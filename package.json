@@ -1,0 +1,41 @@
+{
+  "name": "@pendle/boros-sdk-public",
+  "description": "Pendle Boros SDK (public) — TypeScript client for Boros apis",
+  "license": "MIT",
+  "version": "0.1.3",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pendle-finance/boros-sdk-public.git"
+  },
+  "homepage": "https://github.com/pendle-finance/boros-sdk-public#readme",
+  "bugs": {
+    "url": "https://github.com/pendle-finance/boros-sdk-public/issues"
+  },
+  "scripts": {
+    "build": "yarn clean && yarn tsc -p ./tsconfig.build.json",
+    "typecheck": "tsc --noemit --project tsconfig.json",
+    "clean": "rm -rf dist",
+    "format": "yarn biome format --write",
+    "lint": "yarn biome lint --write",
+    "prepack": "yarn build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@pendle/boros-core": "^1.0.4",
+    "@pendle/boros-offchain-math": "1.0.6",
+    "axios": "^1.15.1",
+    "date-fns": "^4.1.0",
+    "lru-cache": "^11.2.2",
+    "viem": "2.44.4"
+  },
+  "packageManager": "yarn@4.13.0"
+}
