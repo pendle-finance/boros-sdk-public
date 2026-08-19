@@ -11,6 +11,14 @@ export {
   signWithAgent,
   type SignedAgentExecution,
 } from './agent';
+export {
+  API_KEY_ACTIONS,
+  API_KEY_ACTION_TYPES,
+  signApiKeyAction,
+  type ApiKeyAction,
+  type ApiKeyActionEnvelope,
+  type SignApiKeyActionParams,
+} from './apiKeyAction';
 export { createPendleBorosRouterDomain, EIP712_DOMAIN_TYPES, hashStopOrderRequest } from './common';
 export {
   type OTCTradeReq,
