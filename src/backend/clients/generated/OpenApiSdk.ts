@@ -270,6 +270,11 @@ export interface MarketListItemExtConfigResponse {
 
 export interface MarketListItemMetadataResponse {
   /**
+   * Curated market display name (e.g. "ETHUSDT").
+   * @example "ETHUSDT"
+   */
+  name: string;
+  /**
    * Underlying asset symbol
    * @example "stETH"
    */
@@ -280,7 +285,8 @@ export interface MarketListItemMetadataResponse {
    */
   fundingRateSymbol?: string;
   /**
-   * Maximum leverage of the market
+   * DEPRECATED: cosmetic 1/kIM. Will be removed in a future release.
+   * @deprecated
    * @example 20
    */
   maxLeverage: number;
@@ -531,6 +537,19 @@ export interface OhlcvChartResponse {
   results: OhlcvCandleResponse[];
 }
 
+export interface HistoricalUnderlyingAPRResponse {
+  ts: number;
+  /**
+   * Underlying APR from the reference oracle
+   * @example 0.075
+   */
+  u: number;
+}
+
+export interface HistoricalUnderlyingAPRChartResponse {
+  results: HistoricalUnderlyingAPRResponse[];
+}
+
 export interface IndicatorsMetadata {
   /** The `select` array as requested by the caller (echoed back). */
   requested: string[];
@@ -589,6 +608,11 @@ export interface IndicatorDataPoint {
    * @example 3500.25
    */
   ap?: number;
+  /**
+   * Perpetual premium index for the market's funding-rate symbol — the venue-published (mark - index)/index premium that the underlying funding rate is derived from. Unitless decimal (`0.0004` = 4 bps). Stored as hourly bars and forward-filled onto finer grids.
+   * @example 0.0004
+   */
+  pi?: number;
 }
 
 export interface IndicatorsResponse {
@@ -655,10 +679,10 @@ export interface LimitOrderResponseV2 {
   accountId: number;
   /** Whether the order uses cross-margin mode */
   isCross: boolean;
-  /** Lifecycle status. { Cancelled : 1, FullyFilled : 2, Expired : 3, Purged : 4, Filling : 0, Pending : 5, Executing : 6, Retrying : 7, Failed : 8 } */
-  status: 1 | 2 | 3 | 4 | 0 | 5 | 6 | 7 | 8;
-  /** Order kind (LIMIT / MARKET / TP / SL). Time-In-Force is a separate concept set at order placement. { LIMIT : 0, MARKET : 1, TAKE_PROFIT_MARKET : 2, STOP_LOSS_MARKET : 3 } */
-  orderType: 0 | 1 | 2 | 3;
+  /** Lifecycle status. { Filling : 0, Cancelled : 1, FullyFilled : 2, Expired : 3, Purged : 4 } */
+  status: 0 | 1 | 2 | 3 | 4;
+  /** Order kind. Time-In-Force is a separate concept set at order placement. { LIMIT : 0, MARKET : 1 } */
+  orderType: 0 | 1;
   /** Block timestamp of the **last** order update in **Unix seconds (UTC)**. */
   blockTimestamp: number;
   /** Composite cursor of the **last update** to this order — packs block number and intra-block log index. Used as the cursor by `/v1/accounts/orders`. Mutates whenever the order is filled, cancelled, etc. */
@@ -1029,6 +1053,8 @@ export interface PayTreasuryBodyDto {
 }
 
 export interface AddLiquidityToAmmAgentBodyDto {
+  /** User wallet address — the `root` of the margin account providing the liquidity. Used to resolve the AMM sub-account (`root` · accountId 255 · `tokenId` · `marketId`) so the response can set `enterMarket` correctly and include the one-time `marketEntranceFee` in the `ammCashTransfer` leg's `cashIn`. */
+  root: string;
   /**
    * Market ID of the AMM pool to deposit cash into.
    * @min 1
@@ -1068,8 +1094,8 @@ export interface RemoveLiquidityFromAmmAgentBodyDto {
 
 export interface FundingRateSymbolResponse {
   /**
-   * Venue-specific instrument identifier (the symbol as listed by the source exchange).
-   * @example "BTCUSDT"
+   * Venue-specific instrument identifier. Two shapes are in use: Binance rows carry the native uppercase ticker (`BTCUSDT`, `ETHUSDT`), while every other venue uses a synthetic lowercase `<venue>-<asset>` key (`okx-btc`, `hyperliquid-eth`). It is NOT always the symbol as listed by the source exchange — OKX lists `BTC-USDT-SWAP`, which appears here only as `strategyMetadata.name`. Note Hyperliquid uses `-gold`/`-silver` where other venues use `-xau`/`-xag`, so join on this field rather than on `assetSymbol`.
+   * @example "okx-btc"
    */
   fundingRateSymbol: string;
   /**
@@ -1078,8 +1104,8 @@ export interface FundingRateSymbolResponse {
    */
   assetSymbol: string;
   /**
-   * Source venue this funding rate is sourced from.
-   * @example "binance"
+   * Source venue this funding rate is sourced from. Capitalised as displayed, e.g. `Binance`, `OKX`, `Hyperliquid`.
+   * @example "Binance"
    */
   exchange: string;
 }
@@ -1435,14 +1461,89 @@ export interface PlaceOrderSimulationResponseV3 {
    * @example "Succeed"
    */
   statusCode: string;
-  /** Estimated maker order reward in PENDLE. */
+  /**
+   * Estimated maker order reward in PENDLE.
+   * @deprecated
+   */
   makerOrderReward: number;
   /** Echo of the inputs the simulator actually used after rate↔tick conversion and slippage resolution. Use these values when building the matching `place-order` calldata to avoid drift between simulation and submission. */
   resolved: PlaceOrderResolvedResponse;
 }
 
+export interface PlaceOrderAnonymousSimulationBodyDto {
+  /**
+   * Market ID.
+   * @min 1
+   */
+  marketId: number;
+  /** Order side. `0` = LONG (buy yield), `1` = SHORT (sell yield). */
+  side: 0 | 1;
+  /** BigInt string of the notional size (always positive), scaled by 10^18. */
+  size: string;
+  /** Time-in-force (numeric). `0` = GTC, `1` = IOC, `2` = FOK, `3` = ALO, `4` = SOFT_ALO. See [Order book mechanics](https://docs.pendle.finance/boros-dev/Mechanics/OrderBook). */
+  tif: 0 | 1 | 2 | 3 | 4;
+  /** Human-readable rate (e.g. `0.085` = 8.5% APR). **Required** for resting-limit `tif` (`GTC` / `ALO` / `SOFT_ALO`); optional for `IOC` / `FOK`. */
+  rate?: number;
+  /** Relative tolerance from current mid-rate (e.g. `0.005` = 0.5%). Recommended for `FOK` / `IOC`. */
+  slippage?: number;
+  /**
+   * AMM routing. `0` → orderbook-only; a specific AMM id → also route through that AMM. Omitted → market's active `ammId`.
+   * @min 0
+   */
+  ammId?: number;
+}
+
+export interface AnonymousPlaceOrderFeeBreakdownResponse {
+  /** Taker OTC fee charged on the matched portion (bigint, 10^18). Omitted when no fee applies. */
+  takerOtcFee?: string;
+  /**
+   * Spot-USD value of `takerOtcFee`, valued at query time. Omitted when no fee applies.
+   * @example 0.08
+   */
+  takerOtcFeeInUSD?: number;
+}
+
+export interface MakerIncentiveSimulationResponse {
+  /**
+   * Incentive reward earned from filled order volume, denominated in PENDLE
+   * @deprecated
+   * @example 1.25
+   */
+  filledVolumeIncentiveReward: number;
+  /**
+   * Incentive reward earned from providing liquidity, denominated in PENDLE
+   * @example 0.75
+   */
+  provideLiquidityIncentiveReward: number;
+  /** taker-fee rebate preview (collateral token units) */
+  makerFeeRebate: number;
+  /** collateral token address */
+  makerFeeRebateToken: string;
+}
+
+export interface AnonymousPlaceOrderSimulationResponse {
+  /** Matched portion (`size = 0` for a pure resting order; `rate = 0` when nothing matched). */
+  matched: ContractSwapPositionResponse;
+  /** Initial margin the order would require (bigint, 10^18). */
+  marginRequired: string;
+  /**
+   * Price impact of the order vs current mid-rate (decimal).
+   * @example 0.003
+   */
+  priceImpact: number;
+  feeBreakdown: AnonymousPlaceOrderFeeBreakdownResponse;
+  /**
+   * Estimated maker order reward in PENDLE for the matched portion.
+   * @deprecated
+   */
+  makerOrderReward: number;
+  makerIncentive: MakerIncentiveSimulationResponse;
+  /** Echo of the inputs the simulator actually used after rate↔tick conversion and slippage resolution. */
+  resolved: PlaceOrderResolvedResponse;
+}
+
 export interface AddLiquidityToAmmV2SimulationBodyDto {
-  /** User wallet address — the `root` of the margin account. Supplied explicitly because the simulation has no agent signature to read it from (the calldata-builder counterpart `POST /calldata-builder/agent/add-liquidity-to-amm` derives it from the signed payload). */
+  /** User wallet address — the `root` of the margin account. Supplied explicitly because no signature exists yet at this point in the flow; the calldata-builder counterpart `POST /calldata-builder/agent/add-liquidity-to-amm` takes `root` for the same reason. */
   root: string;
   /**
    * Sub-account index under `root` (0–255). `0` is the main sub-account.
@@ -1555,10 +1656,15 @@ export interface GasConsumptionV2Response {
   /** User wallet address — the `root` of the margin account. */
   root: string;
   /**
-   * Gas fee in USD (always positive)
+   * Gas fee in USD (always positive). 0 when this record is a top-up.
    * @example 0.35
    */
   gasFee: number;
+  /**
+   * Top-up / credit amount in USD (positive). Set only for credits; undefined for gas-fee records.
+   * @example 5
+   */
+  topUpAmount?: number;
   txHash: string;
   blockTimestamp: number;
   chainId: number;
@@ -1575,6 +1681,10 @@ export interface FundLocationResponse {
   fundType: "wallet" | "cross_account" | "isolated_account" | "amm";
   /** Numeric `marketId` when `fundType` references an isolated/specific market; omitted for wallet/cross/global locations. */
   marketId?: number;
+  /** Per-side token id. Only set on swap-collateral events. */
+  tokenId?: number;
+  /** Per-side amount (18-decimal bigint string). Only set on swap-collateral events. */
+  amount?: string;
 }
 
 export interface TransferLogResponse {
@@ -1731,6 +1841,11 @@ export interface OrderResponse {
   /** Limit rate (fixed APR) of the order, 18-decimal bigint string. Divide by 1e18 to get the APR as a decimal (e.g. `5e16` → `0.05` = 5%). */
   rate: string;
   /** Initial-margin requirement currently locked behind this resting order, 18-decimal bigint string. */
+  initialMargin: string;
+  /**
+   * DEPRECATED: alias of `initialMargin`. Will be removed in a future release.
+   * @deprecated
+   */
   initialMarginWithLeverage: string;
 }
 
@@ -1745,7 +1860,10 @@ export interface PositionResponse {
   liquidationApr: string;
   /** Raw initial-margin requirement (no leverage), 18-decimal bigint string in the settlement token. */
   initialMargin: string;
-  /** Initial-margin requirement after the account-specific leverage multiplier, 18-decimal bigint string. This is what is actually checked at order/position open. */
+  /**
+   * DEPRECATED: with per-account leverage removed this equals `initialMargin`. Will be removed in a future release.
+   * @deprecated
+   */
   initialMarginWithLeverage: string;
   /** Maintenance-margin requirement, 18-decimal bigint string. The position is liquidatable when the account can no longer cover this. */
   maintMargin: string;
@@ -1764,9 +1882,12 @@ export interface MarketAccInfoResponse {
   positions: PositionResponse[];
   /** Sum of raw per-position initial margins (no leverage), 18-decimal bigint string in the settlement token. */
   initialMargin: string;
-  /** Sum of per-position initial margins after the account-specific leverage multiplier, 18-decimal bigint string. */
+  /**
+   * DEPRECATED: alias of `initialMargin`. Will be removed in a future release.
+   * @deprecated
+   */
   initialMarginWithLeverage: string;
-  /** Remaining margin available for opening new positions/orders (with leverage), 18-decimal bigint string. Reaches 0 when no further IM-consuming actions are possible. */
+  /** Remaining margin available for opening new positions/orders, 18-decimal bigint string. Reaches 0 when no further IM-consuming actions are possible. */
   availableInitialMargin: string;
   /** Remaining buffer before liquidation, 18-decimal bigint string. Zero => health ratio = 1.0 and the account is liquidatable. See [Margin mechanics](https://docs.pendle.finance/boros-dev/Mechanics/Margin#health-ratio). */
   availableMaintMargin: string;
@@ -1819,6 +1940,21 @@ export interface EnteredMarketResponse {
 
 export interface EnteredMarketsResponse {
   results: EnteredMarketResponse[];
+}
+
+export interface MarginConfigResponse {
+  /** The `marketAcc` this config applies to (echoed from the request). */
+  marketAcc: object;
+  /** Numeric market identifier (1-based). */
+  marketId: number;
+  /** The on-chain personal initial-margin override (`kIM`) for this `(marketAcc, marketId)`. Raw fixed-point string, same domain as `market.config.kIM`. Only markets with an active personal override appear in `results`; for any market not listed, use the global `market.config.kIM`. */
+  kIM: string;
+}
+
+export interface MarginConfigsResponse {
+  results: MarginConfigResponse[];
+  /** Sync-core projection freshness. A market absent from `results` means "no personal override as of this block" — overlay against the global config accordingly. */
+  syncStatus: SyncStatusResponse;
 }
 
 export interface LightEventFeedOrderChangeResponse {
@@ -1918,6 +2054,15 @@ export interface FilledVolumeIncentiveResponse {
   avgRewardPerYu: number;
 }
 
+export interface MakerFeeRebateCampaignResponse {
+  /** Fraction of the gross taker fee rebated to makers this epoch (e.g. `0.2` = 20%). Resolved from the market epoch config, falling back to the protocol default. Market-level — present even when `maker` is omitted. */
+  feeShareRate: number;
+  /** Caller's maker-fee rebate accrued so far this epoch, in whole units of the market's collateral token. **0 when `maker` is not provided.** */
+  currentEpochRebate: number;
+  /** Gross taker fee paid on fills of the caller's resting maker orders this epoch — the base the rebate is computed from — in collateral-token units. **0 when `maker` is not provided.** */
+  takerFeeContribution: number;
+}
+
 export interface MakerIncentiveCampaignResponse {
   /** Start of the current incentive epoch (Unix seconds, UTC). All `epoch`-scoped fields are measured against this anchor. */
   epochTimestamp: number;
@@ -1925,6 +2070,8 @@ export interface MakerIncentiveCampaignResponse {
   addLiquidityIncentive: AddLiquidityIncentiveResponse;
   /** Per-epoch filled-volume track (rewards based on share of maker-side fills). */
   filledVolumeIncentive: FilledVolumeIncentiveResponse;
+  /** Current-epoch maker-fee rebate (negative maker fee) for the caller on this market. */
+  makerFeeRebate: MakerFeeRebateCampaignResponse;
 }
 
 export interface AmmIncentivesAllTimeRewards {
@@ -1952,6 +2099,71 @@ export interface AmmIncentivesResponse {
   perMarket: AmmIncentivesMarketEntry[];
 }
 
+export interface RollingVolumeMarketEntry {
+  /**
+   * Market this entry covers.
+   * @example 161
+   */
+  marketId: number;
+  /**
+   * Maker volume on this market over the window, summed across **all** users. Raw 18-decimal fixed-point integer as a string, denominated in this market's notional unit — not comparable across markets. `"0"` when the market had no maker fills in the window.
+   * @example "62760618982792013374397715"
+   */
+  volume: string;
+  /**
+   * Maker volume of the requested `user` on this market over the same window, in the same units as `volume`. Present only when `user` was supplied; `"0"` when that user had no maker fills on this market.
+   * @example "14323940866189248225943680"
+   */
+  userVolume?: string;
+}
+
+export interface RollingVolumeResponse {
+  /**
+   * Length of the window in hours, echoed back as requested. The window ends at the time of the request.
+   * @example 24
+   */
+  windowHours: number;
+  /** One entry per currently active market, sorted by `marketId` ascending. Markets with no maker fills in the window are included with `volume: "0"`. Values are per market and must not be summed across markets — see the endpoint description. */
+  markets: RollingVolumeMarketEntry[];
+  /** How far the indexer had progressed when this response was built — the last fully processed block and its timestamp. Fills in blocks after this are not yet reflected in the volumes. */
+  syncStatus: SyncStatusResponse;
+}
+
+export interface RollingTradeVolumeMarketEntry {
+  /**
+   * Market this entry covers.
+   * @example 161
+   */
+  marketId: number;
+  /**
+   * Traded volume on this market over the window, across all users. Raw 18-decimal integer as a string; `"0"` if the market had no volume.
+   * @example "62760618982792013374397715"
+   */
+  totalVolume: string;
+  /**
+   * Volume from this `user`'s limit orders being filled. Same window and units. Present only when `user` was supplied.
+   * @example "14323940866189248225943680"
+   */
+  userMakerVolume?: string;
+  /**
+   * Volume from this `user`'s market orders. Same window and units.
+   * @example "2011845330099277184102400"
+   */
+  userTakerVolume?: string;
+}
+
+export interface RollingTradeVolumeResponse {
+  /**
+   * Window length in hours, echoed back. The window ends at the time of the request.
+   * @example 24
+   */
+  windowHours: number;
+  /** One entry per active market, sorted by `marketId` ascending. Markets with no volume in the window are included with `"0"`. */
+  markets: RollingTradeVolumeMarketEntry[];
+  /** Last fully processed block and its timestamp. Fills in later blocks are not yet reflected in the volumes. */
+  syncStatus: SyncStatusResponse;
+}
+
 export interface AgentExpiryTimeResponse {
   /**
    * Unix seconds (UTC) at which the agent's authorization expires. `0` if the agent has never been approved or has been revoked. Compare against the current time to determine if the agent is still valid.
@@ -1977,7 +2189,10 @@ export interface StrategyMarketResponse {
   state: string;
   /** Market's current mid implied APR (1.0 = 100%). */
   impliedApr: number;
-  /** Maximum leverage allowed for fixed (held-to-maturity) positions. */
+  /**
+   * DEPRECATED: cosmetic 1/kIM. Compute from `kIM` directly. Will be removed in a future release.
+   * @deprecated
+   */
   maxLeverage: number;
   /** Maximum leverage allowed for perpetual-style (rolled) positions. */
   maxPerpLeverage: number;
@@ -2030,13 +2245,13 @@ export interface LeaderboardEntryResponse {
   root: string;
   /** Sub-account index under `root` (0–255). `0` is the main sub-account. */
   accountId: number;
-  /** Realized + unrealized PnL over the period, in **raw base units** of the collateral token. Stringified bigint. */
+  /** Realized + unrealized PnL over the period, denominated in the collateral token. 18-decimal fixed-point integer as a string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   pnl: string;
-  /** Account's current net balance in raw base units of the collateral token. Stringified bigint. */
+  /** Account's current net balance, denominated in the collateral token. 18-decimal fixed-point integer as a string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   netBalance: string;
-  /** Cumulative notional traded over the period in raw base units of the collateral token. Stringified bigint. */
+  /** Cumulative notional traded over the period, denominated in the collateral token. 18-decimal fixed-point integer as a string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   tradingVolume: string;
-  /** Peak capital deployed during the period — used as the denominator in ROI. Stringified bigint, raw base units. */
+  /** Peak capital deployed during the period — used as the denominator in ROI. Denominated in the collateral token, as an 18-decimal fixed-point integer string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   maxCapital: string;
   /** Return on capital over the period, expressed as a decimal (1.0 = +100%). Used as the ranking key. */
   roi: number;
@@ -2054,11 +2269,11 @@ export interface LeaderboardResponse {
 export interface UserSearchResponse {
   /** 1-based rank in the snapshot. **Present only when the user is in the leaderboard** — omitted when computing fallback values from daily snapshots. */
   rank?: number;
-  /** User's PnL over the period in raw base units of the collateral token. Stringified bigint. */
+  /** User's PnL over the period, denominated in the collateral token. 18-decimal fixed-point integer as a string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   pnl: string;
-  /** User's current net balance in raw base units of the collateral token. Stringified bigint. */
+  /** User's current net balance, denominated in the collateral token. 18-decimal fixed-point integer as a string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   netBalance: string;
-  /** User's notional volume over the period in raw base units. Stringified bigint. */
+  /** User's notional volume over the period, denominated in the collateral token. 18-decimal fixed-point integer as a string; the scale is 1e18 for every token, independent of its ERC-20 decimals. */
   tradingVolume: string;
   /** ROI over the period (1.0 = +100%). **Present only when the user is in the leaderboard.** */
   roi?: number;
@@ -2287,6 +2502,339 @@ export interface DedicatedTxResponse {
   txHash?: string | null;
   /** List of calldata that failed simulation. Only present when simulate=true and some calls reverted. */
   failedSimulations?: FailedSimulationItem[];
+}
+
+export interface CreateSigningKeyDto {
+  /**
+   * Root wallet that owns the keys
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  root: string;
+  /**
+   * Unix milliseconds; must be within 5 minutes of server time
+   * @example 1786000000000
+   */
+  timestamp: number;
+  /**
+   * Single-use 32-byte hex nonce
+   * @example "0x3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+   */
+  nonce: string;
+  /** EIP-712 ApiKeyAction signature by the root wallet, or by `agent` */
+  signature: string;
+  /**
+   * Agent approved on this root. Sign with the agent key instead of the root key.
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  agent?: string;
+  /**
+   * Your label for the key. 1-32 printable ASCII characters, unique among your live keys.
+   * @example "prod-mm-bot-01"
+   */
+  name: string;
+  /**
+   * Expire the key after this many days. Omit for no expiry.
+   * @example 90
+   */
+  expiresInDays?: number;
+}
+
+export interface SigningKeySecretDto {
+  /** @example "pdk_9f3c1e7a4b20d85c" */
+  keyId: string;
+  /** @example "prod-mm-bot-01" */
+  name: string;
+  /**
+   * Unix seconds
+   * @example 1786000000
+   */
+  createdAt: number;
+  /**
+   * Unix seconds
+   * @example 1793776000
+   */
+  expiresAt?: number;
+  /**
+   * Unix seconds of the last successful authenticated request. Best-effort telemetry, flushed periodically — may lag by a few minutes.
+   * @example 1786000000
+   */
+  lastUsedAt?: number;
+  /**
+   * Agent that minted this key. Absent when the root minted it itself. Audit only.
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  createdByAgent?: string;
+  /** @example "0x1234567890123456789012345678901234567890" */
+  root: string;
+  /**
+   * Ed25519 private key, PKCS#8 PEM. Shown once — store it now. Sign every request JWT with it (alg EdDSA).
+   * @example "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIG...\n-----END PRIVATE KEY-----\n"
+   */
+  privateKey: string;
+}
+
+export interface SigningKeyDto {
+  /** @example "pdk_9f3c1e7a4b20d85c" */
+  keyId: string;
+  /** @example "prod-mm-bot-01" */
+  name: string;
+  /**
+   * Unix seconds
+   * @example 1786000000
+   */
+  createdAt: number;
+  /**
+   * Unix seconds
+   * @example 1793776000
+   */
+  expiresAt?: number;
+  /**
+   * Unix seconds of the last successful authenticated request. Best-effort telemetry, flushed periodically — may lag by a few minutes.
+   * @example 1786000000
+   */
+  lastUsedAt?: number;
+  /**
+   * Agent that minted this key. Absent when the root minted it itself. Audit only.
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  createdByAgent?: string;
+}
+
+export interface UpdateSigningKeyDto {
+  /**
+   * Root wallet that owns the keys
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  root: string;
+  /**
+   * Unix milliseconds; must be within 5 minutes of server time
+   * @example 1786000000000
+   */
+  timestamp: number;
+  /**
+   * Single-use 32-byte hex nonce
+   * @example "0x3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+   */
+  nonce: string;
+  /** EIP-712 ApiKeyAction signature by the root wallet, or by `agent` */
+  signature: string;
+  /**
+   * Agent approved on this root. Sign with the agent key instead of the root key.
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  agent?: string;
+  /**
+   * Key to act on. Carried in the body, never the URL path.
+   * @example "pdk_9f3c1e7a4b20d85c"
+   */
+  keyId: string;
+  /**
+   * New label. Same rules as create.
+   * @example "prod-mm-bot-02"
+   */
+  name: string;
+}
+
+export interface SigningKeyIdDto {
+  /**
+   * Root wallet that owns the keys
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  root: string;
+  /**
+   * Unix milliseconds; must be within 5 minutes of server time
+   * @example 1786000000000
+   */
+  timestamp: number;
+  /**
+   * Single-use 32-byte hex nonce
+   * @example "0x3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+   */
+  nonce: string;
+  /** EIP-712 ApiKeyAction signature by the root wallet, or by `agent` */
+  signature: string;
+  /**
+   * Agent approved on this root. Sign with the agent key instead of the root key.
+   * @example "0x1234567890123456789012345678901234567890"
+   */
+  agent?: string;
+  /**
+   * Key to act on. Carried in the body, never the URL path.
+   * @example "pdk_9f3c1e7a4b20d85c"
+   */
+  keyId: string;
+}
+
+export interface Eip712DomainDto {
+  /** @example "Pendle Boros Router" */
+  name: string;
+  /** @example "1.0" */
+  version: string;
+  /** @example 42161 */
+  chainId: number;
+  /**
+   * Boros router — differs per environment
+   * @example "0x0000000000000000000000000000000000000000"
+   */
+  verifyingContract: string;
+}
+
+export interface StopOrderRowResponse {
+  /** Order hash. Pass to `GET /stop-orders/detail` or `POST /cancel`. */
+  orderId: string;
+  /** Root wallet that owns the order. Always the API key holder. */
+  root: string;
+  marketId: number;
+  /** Sub-account index (0-255) the order belongs to. */
+  accountId: number;
+  /** Packed market account of the maker. */
+  marketAcc: string;
+  /** `true` → cross-margin, `false` → isolated on `marketId`. */
+  isCross: boolean;
+  /** Side { LONG : 0, SHORT : 1 } */
+  side: 0 | 1;
+  /** Status { Filling : 0, Cancelled : 1, FullyFilled : 2, Expired : 3, Purged : 4, Pending : 5, Executing : 6, Retrying : 7, Failed : 8 }. Note the values are not contiguous with the limit-order enum. */
+  status: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  /** Order type { TAKE_PROFIT_MARKET : 2, STOP_LOSS_MARKET : 3 }. Same numbering as the limit-order `orderType`, minus its two non-conditional members. */
+  orderType: 2 | 3;
+  /** Trigger APR. The order is submitted once the market crosses this rate. */
+  stopApr: number;
+  /** BigInt string of the notional size, scaled by 10^18. */
+  placedSize: string;
+  /** BigInt string of the size still unfilled, scaled by 10^18. */
+  unfilledSize: string;
+  /** BigInt string of the initial margin this order reserves, scaled by 10^18. */
+  marginRequired: string;
+  /** Tick of the trigger APR (the same threshold as `stopApr`), snapped to the market tick step. NOT the execution guard tick of the order that gets placed — that is pinned to the side extreme and is not returned. */
+  tick: number;
+  /** Whether the order closes the whole position when it triggers. */
+  isClosePosition: boolean;
+  /** Unix seconds of the last state change, not of placement — cancelling or failing an order rewrites it. */
+  blockTimestamp: number;
+}
+
+export interface StopOrdersResponse {
+  results: StopOrderRowResponse[];
+  /** Resume token for fetching the next page. Null if there are no more results. */
+  resumeToken?: string;
+  /** Current sync status of the backend */
+  syncStatus: SyncStatusResponse;
+}
+
+export interface StopOrderRequestResponse {
+  /**
+   * Packed 44-character account (`root` 20B · `accountId` 1B) derived from the API key. Part of the signed struct.
+   * @example "0x009dcf85824e024fea9e3ef583dccbea68edbc37b8"
+   */
+  account: string;
+  /** `true` → cross-margin account, `false` → isolated on `marketId`. */
+  cross: boolean;
+  /** Market the triggered order executes on. */
+  marketId: number;
+  /** Side { LONG : 0, SHORT : 1 } */
+  side: 0 | 1;
+  /** TimeInForce { GOOD_TIL_CANCELLED : 0, IMMEDIATE_OR_CANCEL : 1, FILL_OR_KILL : 2, ADD_LIQUIDITY_ONLY : 3, SOFT_ADD_LIQUIDITY_ONLY : 4 }. Always FILL_OR_KILL — a triggered stop takes liquidity or nothing. */
+  tif: 0 | 1 | 2 | 3 | 4;
+  /** BigInt string of the notional size, scaled by 10^18. `2^256 - 1` when `closePosition` was requested with `size = 0`. */
+  size: string;
+  /** Execution guard tick — pinned to the side's extreme so the order fills at any rate once triggered. */
+  tick: number;
+  /** Always `true` — a stop order may only reduce an existing position. */
+  reduceOnly: boolean;
+  /** BigInt string salt making the order hash unique. */
+  salt: string;
+  /** BigInt string expiry in unix seconds. */
+  expiry: string;
+  /** Raw trigger condition. Its keccak256 is the last field of the signed `actionHash`; send it back on `POST /stop-orders/place` as the top-level `offchainCondition` — the server hashes it itself. */
+  offchainCondition: string;
+}
+
+export interface PrepareTpslStopOrderResponse {
+  req: StopOrderRequestResponse;
+  /** Raw trigger condition, unhashed. Send it as `offchainCondition` on `POST /stop-orders/place` — the backend needs it to evaluate the trigger. */
+  offchainCondition: string;
+}
+
+export interface StopOrderResponse {
+  result: StopOrderRowResponse;
+  /** Current sync status of the backend */
+  syncStatus: SyncStatusResponse;
+}
+
+export interface PlaceStopOrderMsgDto {
+  /**
+   * Action hash the agent signed to authorise this placement.
+   * @example "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+   */
+  actionHash: string;
+}
+
+export interface PlaceStopOrderRequestDto {
+  /** `true` → cross-margin account, `false` → isolated account on `marketId`. */
+  cross: boolean;
+  /**
+   * Market the triggered order executes on.
+   * @min 1
+   */
+  marketId: number;
+  /** Side { LONG : 0, SHORT : 1 } */
+  side: 0 | 1;
+  /** TimeInForce { GOOD_TIL_CANCELLED : 0, IMMEDIATE_OR_CANCEL : 1, FILL_OR_KILL : 2, ADD_LIQUIDITY_ONLY : 3, SOFT_ADD_LIQUIDITY_ONLY : 4 } */
+  tif: 0 | 1 | 2 | 3 | 4;
+  /** BigInt string of the notional size, scaled by 10^18. */
+  size: string;
+  /**
+   * Signed integer tick on the discrete rate ladder, in [-32768, 32767] (int16). Maps to APR via `rate = 1.00005^(tick × tickStep) - 1`, where `tickStep` is per-market.
+   * @min -32768
+   * @max 32767
+   */
+  tick: number;
+  /** If `true` the triggered order can only reduce an existing position, never open one. */
+  reduceOnly: boolean;
+  /** BigInt string salt making the order hash unique. */
+  salt: string;
+  /** BigInt string expiry in unix seconds. The order is dropped once passed, triggered or not. */
+  expiry: string;
+}
+
+export interface PlaceStopOrderBodyDto {
+  /** Address of the agent whose key produced `placeSignature`. Must be an agent approved by the API key owner — the account is derived from the key, never from this field. */
+  agent: string;
+  placeMsg: PlaceStopOrderMsgDto;
+  /** EIP-712 signature over `placeMsg.actionHash` from `agent`. */
+  placeSignature: string;
+  request: PlaceStopOrderRequestDto;
+  /** Raw (unhashed) offchain condition from `GET /stop-orders/prepare`. Its keccak256 is what `placeMsg.actionHash` commits to, so sending a different one fails the hash check. */
+  offchainCondition: string;
+  /** StopAprOrderType { TAKE_PROFIT_MARKET : 2, STOP_LOSS_MARKET : 3 } */
+  type: 2 | 3;
+  /** If `true` the trigger closes the whole position, ignoring `request.size`. */
+  closePosition: boolean;
+}
+
+export interface PlaceStopOrderResponse {
+  /**
+   * Hash identifying the placed stop order — the `orderId` used by the list, get and cancel endpoints.
+   * @example "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+   */
+  orderHash: string;
+}
+
+export interface CancelStopOrdersBodyDto {
+  /** Address of the agent whose key produced `cancelSignature`. Must be an agent approved by the API key owner — the account is derived from the key, never from this field. */
+  agent: string;
+  /**
+   * Conditional-order hashes to cancel, 1-50 per request. All-or-nothing: the request fails if any id is unknown, already finalised, or owned by another account.
+   * @example ["0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"]
+   */
+  orderIds: string[];
+  /** EIP-712 cancellation signature from `agent`. */
+  cancelSignature: string;
+}
+
+export interface CancelStopOrdersResponse {
+  /** @example "Order cancelled successfully" */
+  message: string;
 }
 
 import type {
@@ -2621,7 +3169,7 @@ export class Sdk<
       }),
 
     /**
-     * @description Returns aggregated order book data for a market, grouped by `tickSize` (tick aggregation step). The response contains `long` (bid) and `short` (ask) sides as parallel arrays: `ia[i]` is the implied APR at level `i` (unitless decimal, e.g. `0.085` = 8.5%), `sz[i]` is the total notional size at that level as a **bigint string** in 18-decimal YU (yield units). Long levels are sorted descending by APR (best bid first); short levels ascending by APR (best ask first). Each side is capped at the **best 50 entries**. **AMM merging.** When `includeAmm=true`, on-chain AMM positions are merged into the book before the 50-entry cap is applied. When `includeAmm=false` (default), only resting limit orders are returned, also capped at 50 entries per side. **Tick size.** `tickSize` controls how raw ticks are bucketed before aggregation. See [Order Book mechanics](https://docs.pendle.finance/boros-dev/Mechanics/OrderBook) for the tick-to-rate exponential mapping and matching rules.
+     * @description Returns aggregated order book data for a market, grouped by `tickSize` (tick aggregation step). The response contains `long` (bid) and `short` (ask) sides as parallel arrays: `ia[i]` is the **tick index** at level `i` — a signed integer, NOT an APR. Multiply by the requested `tickSize` to get the implied APR as a unitless decimal (e.g. `ia[i] = 316` at `tickSize = 0.0001` → `0.0316` = 3.16% APR; negative values are valid on negative-funding markets). `sz[i]` is the total notional size at that level as a **bigint string** in 18-decimal YU (yield units). Long levels are sorted descending by APR (best bid first); short levels ascending by APR (best ask first). Each side is capped at the **best 50 entries**. **AMM merging.** When `includeAmm=true`, on-chain AMM positions are merged into the book before the 50-entry cap is applied. When `includeAmm=false` (default), only resting limit orders are returned, also capped at 50 entries per side. **Tick size.** `tickSize` controls how raw ticks are bucketed before aggregation. See [Order Book mechanics](https://docs.pendle.finance/boros-dev/Mechanics/OrderBook) for the tick-to-rate exponential mapping and matching rules.
      *
      * @tags Markets
      * @name MarketsControllerGetOrderBook
@@ -2678,7 +3226,7 @@ export class Sdk<
         startTimestamp?: number;
         /**
          * End timestamp (Unix seconds). Floored to `timeFrame` and clamped to *now*. Defaults to *now*.
-         * @default 1779260620
+         * @default 1786964551
          */
         endTimestamp?: number;
       },
@@ -2691,10 +3239,47 @@ export class Sdk<
         format: "json",
         ...params,
       }),
+
+    /**
+     * @description Returns the historical underlying (funding-rate-derived) APR series for a market underlying, identified by `assetSymbol` + `exchange`. Each point is `{ ts, u }` — `ts` is the period-start (Unix seconds) and `u` is the underlying APR as a unitless decimal. `timeFrame` is the bucket size in seconds (default 3600). Returns 404 if no funding-rate strategy matches the asset/exchange.
+     *
+     * @tags Markets
+     * @name MarketsControllerGetHistoricalUnderlyingApr
+     * @summary Get historical underlying APR by asset symbol and exchange
+     * @request GET:/v1/markets/historical-underlying-apr
+     */
+    marketsControllerGetHistoricalUnderlyingApr: (
+      query: {
+        /** @example "BTC" */
+        assetSymbol: string;
+        /** @example "binance" */
+        exchange: string;
+        /**
+         * TimeFrame in seconds, default to be 3600
+         * @example 3600
+         */
+        timeFrame: number;
+        /** @default 0 */
+        startTimestamp?: number;
+        /**
+         * End timestamp (Unix seconds), default to current timestamp
+         * @default 1786964551
+         */
+        endTimestamp?: number;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<HistoricalUnderlyingAPRChartResponse, void>({
+        path: `/v1/markets/historical-underlying-apr`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
   };
   indicators = {
     /**
-     * @description Unified endpoint for fetching market indicators on a uniform time grid: - `u` — underlying APR (unitless decimal, `0.085` = 8.5%). - `fp` — future premium (mark APR minus underlying APR). - `fgi` — Fear & Greed Index, returned as `{ v: 0..100, vc: classification }`. - `ap` — asset price in **USD**. - `udma:<periods>` — X-day moving average(s) of the underlying funding rate; periods are integers `1..365` separated by `;`, max 10 periods (e.g. `udma:7;30`). **Time grid.** `startTimestamp` and `endTimestamp` are **Unix seconds**, floored to the chosen `timeFrame` bucket. `endTimestamp` defaults to *now*; `startTimestamp` defaults to `0`. `endTimestamp >= startTimestamp` is enforced after rounding. Each result row corresponds to one bucket on the grid, ordered ascending by `ts`. **Response cap.** The `[startTimestamp, endTimestamp]` window is capped to **500** buckets at the chosen `timeFrame`; if the window is larger, `startTimestamp` is automatically advanced so the response holds the **most recent 500 buckets** ending at `endTimestamp`. For longer ranges, use `GET /indicators/export` (CSV, up to 10,000 rows). **Forward-fill.** Sparse indicators (e.g. hourly `fgi` queried at `5m`) are forward-filled from the most recent known value. `metadata.firstDataTimestamp[indicator]` reports the earliest bucket with real data so callers can render "no data before X". `metadata.uLastSettledTimestamp` marks the last bucket where `u` is settled historical data; later buckets use real-time funding rates and may revise. **Cost.** Dynamic: **1 CU per indicator in `select`.** A `udma:7;30` entry counts as a single indicator regardless of how many moving-average periods are packed into it.
+     * @description Unified endpoint for fetching market indicators on a uniform time grid: - `u` — underlying APR (unitless decimal, `0.085` = 8.5%). - `fp` — future premium (mark APR minus underlying APR). - `fgi` — Fear & Greed Index, returned as `{ v: 0..100, vc: classification }`. - `ap` — asset price in **USD**. - `pi` — perpetual premium index for the market's funding-rate symbol, i.e. the venue-published `(mark - index) / index` premium the underlying funding rate is derived from. Raw per-interval decimal, **not** annualised. Stored as hourly bars, so finer `timeFrame`s repeat the hourly value. - `udma:<periods>` — X-day moving average(s) of the underlying funding rate; periods are integers `1..365` separated by `;`, max 10 periods (e.g. `udma:7;30`). **Time grid.** `startTimestamp` and `endTimestamp` are **Unix seconds**, floored to the chosen `timeFrame` bucket. `endTimestamp` defaults to *now*; `startTimestamp` defaults to `0`. `endTimestamp >= startTimestamp` is enforced after rounding. Each result row corresponds to one bucket on the grid, ordered ascending by `ts`. **Response cap.** The `[startTimestamp, endTimestamp]` window is capped to **500** buckets at the chosen `timeFrame`; if the window is larger, `startTimestamp` is automatically advanced so the response holds the **most recent 500 buckets** ending at `endTimestamp`. For longer ranges, use `GET /indicators/export` (CSV, up to 10,000 rows). **Forward-fill.** Sparse indicators (e.g. hourly `fgi` queried at `5m`) are forward-filled from the most recent known value. `metadata.firstDataTimestamp[indicator]` reports the earliest bucket with real data so callers can render "no data before X". `metadata.uLastSettledTimestamp` marks the last bucket where `u` is settled historical data; later buckets use real-time funding rates and may revise. **Cost.** Dynamic: **1 CU per indicator in `select`.** A `udma:7;30` entry counts as a single indicator regardless of how many moving-average periods are packed into it.
      *
      * @tags Indicators
      * @name IndicatorsControllerGetIndicators
@@ -2717,11 +3302,11 @@ export class Sdk<
         startTimestamp?: number;
         /**
          * End timestamp (Unix seconds), floored to `timeFrame` and clamped to *now*. Defaults to *now*. Must be `>= startTimestamp` after rounding.
-         * @default 1779260620
+         * @default 1786964551
          */
         endTimestamp?: number;
         /**
-         * Comma-separated list of indicators to return. Supported: `u` (underlying APR), `fp` (future premium), `fgi` (Fear & Greed Index), `ap` (asset price USD), `udma:<periods>` (X-day moving averages of underlying funding rate, integer periods 1-365 separated by `;`, max 10 periods, e.g. `udma:7;30`). At least 1 entry required. Each entry costs **1 CU**.
+         * Comma-separated list of indicators to return. Supported: `u` (underlying APR), `fp` (future premium), `fgi` (Fear & Greed Index), `ap` (asset price USD), `pi` (perpetual premium index, raw per-interval decimal), `udma:<periods>` (X-day moving averages of underlying funding rate, integer periods 1-365 separated by `;`, max 10 periods, e.g. `udma:7;30`). At least 1 entry required. Each entry costs **1 CU**.
          * @example "u,fp,fgi,ap,udma:7;30"
          */
         select: string;
@@ -2737,7 +3322,7 @@ export class Sdk<
       }),
 
     /**
-     * @description Streams a CSV file with one row per `timeFrame` bucket on the `[startTimestamp, endTimestamp]` grid (Unix seconds, floored to `timeFrame`). OHLCV columns (`o`, `h`, `l`, `c`, `v` — APR decimals for OHLC, USD for `v`) are **always** included; pass `select` to add any of `u`, `fp`, `fgi`, `ap`, `udma:<periods>` (same format as `GET /indicators`). **Response cap.** Up to **10,000** rows per call. If the requested window exceeds 10,000 buckets, `startTimestamp` is advanced so the file holds the most recent 10,000 buckets ending at `endTimestamp`. Filename pattern: `indicators-<marketId>-<timeFrame>-<unixMs>.csv`, served as `text/csv` attachment.
+     * @description Streams a CSV file with one row per `timeFrame` bucket on the `[startTimestamp, endTimestamp]` grid (Unix seconds, floored to `timeFrame`). OHLCV columns (`o`, `h`, `l`, `c`, `v` — APR decimals for OHLC, USD for `v`) are **always** included; pass `select` to add any of `u`, `fp`, `fgi`, `ap`, `pi`, `udma:<periods>` (same format as `GET /indicators`). **Response cap.** Up to **10,000** rows per call. If the requested window exceeds 10,000 buckets, `startTimestamp` is advanced so the file holds the most recent 10,000 buckets ending at `endTimestamp`. Filename pattern: `indicators-<marketId>-<timeFrame>-<unixMs>.csv`, served as `text/csv` attachment.
      *
      * @tags Indicators
      * @name IndicatorsControllerGetIndicatorsExport
@@ -2764,11 +3349,11 @@ export class Sdk<
         startTimestamp?: number;
         /**
          * End timestamp (Unix seconds), floored to `timeFrame` and clamped to *now*. Defaults to *now*. Must be `>= startTimestamp` after rounding.
-         * @default 1779260620
+         * @default 1786964551
          */
         endTimestamp?: number;
         /**
-         * Comma-separated list of **additional** indicators to include alongside OHLCV (which is always present). Supported: `u`, `fp`, `fgi`, `ap`, `udma:<periods>` (integer periods 1-365 separated by `;`, max 10 periods, e.g. `udma:3;7;30`). Empty/omitted = OHLCV only.
+         * Comma-separated list of **additional** indicators to include alongside OHLCV (which is always present). Supported: `u`, `fp`, `fgi`, `ap`, `pi`, `udma:<periods>` (integer periods 1-365 separated by `;`, max 10 periods, e.g. `udma:3;7;30`). Empty/omitted = OHLCV only.
          * @example "u,fgi,fp,ap,udma:3;7;30"
          */
         select?: string;
@@ -2945,7 +3530,7 @@ export class Sdk<
       }),
 
     /**
-     * @description Returns raw decoded events emitted by Boros contracts. Each item includes the base envelope (`eventName`, `txHash`, `blockNumber`, `logIndex`, `eventIndex`, `blockTimestamp`, `isFinalized`) plus a `data` map carrying event-specific decoded fields. Sorted by `eventIndex` descending (newest first); `eventIndex` is a stable monotonic ordering key. Pagination is cursor-based via `resumeToken`. The `[fromBlockNumber, toBlockNumber]` filter is inclusive on both ends. `eventName` is a free-form string matching the on-chain event names (e.g. `BulkOrdersExecuted`, `Liquidate`, `Settlement`).
+     * @description Returns raw decoded events emitted by Boros contracts. Each item includes the base envelope (`eventName`, `txHash`, `blockNumber`, `logIndex`, `eventIndex`, `blockTimestamp`, `isFinalized`) plus a `data` map carrying event-specific decoded fields. Sorted by `eventIndex` descending (newest first); `eventIndex` is a stable monotonic ordering key. Pagination is cursor-based via `resumeToken`. The `[fromBlockNumber, toBlockNumber]` filter is inclusive on both ends. `eventName` is matched exactly and case-sensitively against the emitted contract event name (e.g. `BulkOrdersExecuted`, `Liquidate`, `PaymentFromSettlement`). An unrecognised name is not rejected — it returns 200 with zero results rather than a 400.
      *
      * @tags Miscellaneous
      * @name OnChainEventsV2ControllerGetEvents
@@ -3040,6 +3625,69 @@ export class Sdk<
       }),
 
     /**
+     * @description **Deprecated — use `/v1/trade-volume/rolling`**, which takes the same query parameters and window and reports each market's total traded volume. There, `userVolume` becomes `userMakerVolume`. Maker volume per market over a rolling window ending now: fills where the account was the maker, its resting limit order having been hit. **Units.** Raw 18-decimal integer as a string, in that market's notional unit — **not summable across markets**, which settle in different collateral. **`windowHours`** min 1, max 168, default 24. **`user`** (optional) is matched at wallet (`root`) level and adds `userVolume` to each market. **Cost.** Flat 3 CU.
+     *
+     * @tags Miscellaneous
+     * @name MakerVolumeControllerGetRollingVolume
+     * @summary Get rolling maker volume per market
+     * @request GET:/v1/maker-volume/rolling
+     * @deprecated
+     */
+    makerVolumeControllerGetRollingVolume: (
+      query?: {
+        /** Wallet address (`root`) to additionally report volume for. Matched at wallet level, covering every sub-account under it. When supplied, each market gains a `userVolume` field; when omitted, only the all-user `volume` is returned. */
+        user?: string;
+        /**
+         * Length of the rolling window in hours, counted backwards from the time of the request. Min **1**, max **168** (7 days).
+         * @min 1
+         * @max 168
+         * @default 24
+         * @example 24
+         */
+        windowHours?: number;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<RollingVolumeResponse, any>({
+        path: `/v1/maker-volume/rolling`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Traded volume per market over a rolling window ending now, across all users. Supersedes `/v1/maker-volume/rolling`. **Units.** Raw 18-decimal integer as a string, in that market's notional unit — **not summable across markets**, which settle in different collateral. **`windowHours`** min 1, max 168, default 24. **`user`** (optional, wallet `root` level) adds that user's own volume to each market: `userMakerVolume` from their limit orders being filled, `userTakerVolume` from their market orders. **Cost.** Flat 3 CU.
+     *
+     * @tags Miscellaneous
+     * @name TradeVolumeControllerGetRollingTradeVolume
+     * @summary Get rolling traded volume per market
+     * @request GET:/v1/trade-volume/rolling
+     */
+    tradeVolumeControllerGetRollingTradeVolume: (
+      query?: {
+        /** Wallet address (`root`) to also report volume for, covering every sub-account under it. Adds `userMakerVolume` / `userTakerVolume` to each market. */
+        user?: string;
+        /**
+         * Rolling window length in hours, counted back from now. Min 1, max 168 (7 days).
+         * @min 1
+         * @max 168
+         * @default 24
+         * @example 24
+         */
+        windowHours?: number;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<RollingTradeVolumeResponse, any>({
+        path: `/v1/trade-volume/rolling`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
      * @description Returns **cross-venue spread** strategies — pairs of (long market, short market) grouped by the same `(assetSymbol, tokenId, maturity)` (i.e. identical maturity but different funding-rate venues) — that satisfy: - both markets have **> 10 days to maturity**, and - the estimated APR × max leverage (net of fees and combined margin) is strictly positive. Results are sorted by `aprTimesMaxLeverage` descending.
      *
      * @tags Miscellaneous
@@ -3087,7 +3735,7 @@ export class Sdk<
          */
         period: "all_time" | "30d" | "7d";
         /**
-         * Collateral token id the leaderboard is scoped to (one leaderboard per token). All amounts in the response are in raw base units of this token.
+         * Collateral token id the leaderboard is scoped to (one leaderboard per token). Amounts in the response are denominated in this token as 18-decimal fixed-point integers; the scale is 1e18 for every token, independent of its ERC-20 decimals.
          * @min 1
          */
         tokenId: number;
@@ -3445,7 +4093,7 @@ export class Sdk<
       }),
 
     /**
-     * @description Generate **agent-executable** calldata for depositing cash into a market's AMM pool as **single-sided liquidity** (cash only — the AMM auto-balances by taking the matching swap leg internally). Cash is sourced from the user's **cross** account on the market's `tokenId`. **Returned `executeParams[]` is a 2-call sequence**: an `ammCashTransfer` that pulls cash from the cross account into the AMM-account leg (its `cashIn` already includes any one-time `marketEntranceFee` if the AMM account has not yet entered the market), followed by the `addLiquiditySingleCashToAmm` call. The agent must submit the entries in order via `POST /v1/agent/send-transactions`. `minLpOut` is the slippage guard on LP tokens received — set conservatively. The desired-swap-rate guard for the AMM's internal balancing is computed by the backend from the current mid-rate.
+     * @description Generate **agent-executable** calldata for depositing cash into a market's AMM pool as **single-sided liquidity** (cash only — the AMM auto-balances by taking the matching swap leg internally). Cash is sourced from the user's **cross** account on the market's `tokenId`. **Returned `executeParams[]` is a 2-call sequence**: an `ammCashTransfer` that pulls cash from the cross account into the AMM-account leg (its `cashIn` already includes any one-time `marketEntranceFee` if the AMM account has not yet entered the market), followed by the `addLiquiditySingleCashToAmm` call. The agent must submit the entries in order via `POST /v1/agent/send-transactions`. `root` is **required**: the emitted bytes are not user-agnostic. Both `enterMarket` and the `marketEntranceFee` above depend on whether that `root`’s AMM sub-account has already entered this market, and this endpoint is called before any signature exists, so it cannot infer the address. `minLpOut` is the slippage guard on LP tokens received — set conservatively. The desired-swap-rate guard for the AMM's internal balancing is computed by the backend from the current mid-rate.
      *
      * @tags Calldata-Builder (Agent-Executable)
      * @name CalldataBuilderAgentControllerBuildAddLiquidityToAmm
@@ -3564,6 +4212,27 @@ export class Sdk<
     ) =>
       this.request<PlaceOrderSimulationResponseV3, void>({
         path: `/v1/simulations/place-order`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Preview a place-order without a connected wallet.
+     *
+     * @tags Simulations
+     * @name SimulationsControllerSimulatePlaceOrderAnonymous
+     * @summary Place order (anonymous, no wallet connected)
+     * @request POST:/v1/simulations/place-order-anonymous
+     */
+    simulationsControllerSimulatePlaceOrderAnonymous: (
+      data: PlaceOrderAnonymousSimulationBodyDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<AnonymousPlaceOrderSimulationResponse, void>({
+        path: `/v1/simulations/place-order-anonymous`,
         method: "POST",
         body: data,
         type: ContentType.Json,
@@ -3768,7 +4437,7 @@ export class Sdk<
          * @example true
          */
         isActive?: boolean;
-        /** OrderType { LIMIT : 0, MARKET : 1, TAKE_PROFIT_MARKET : 2, STOP_LOSS_MARKET : 3 }. Comma-separated for multiple values (e.g., "0,1,2,3"). Filters by **order kind** — `MARKET` orders sweep the book and never rest, the others (LIMIT / TP_MARKET / SL_MARKET) rest until matched, cancelled, or triggered. Time-In-Force (GTC / IOC / FOK / POST_ONLY) is a separate concept set at order placement. */
+        /** NormalOrderType { LIMIT : 0, MARKET : 1 }. Comma-separated for multiple values (e.g., "0,1"). Filters by **order kind** — `MARKET` orders sweep the book and never rest, `LIMIT` orders rest until matched, cancelled, or expired. Time-In-Force (GTC / IOC / FOK / POST_ONLY) is a separate concept set at order placement. Conditional (TP / SL) orders are not served by this API. */
         orderType?: string;
       },
       params: RequestParams = {},
@@ -4005,6 +4674,29 @@ export class Sdk<
       }),
 
     /**
+     * @description Returns the account's on-chain personal initial-margin overrides — one entry per market where a personal `kIM` is set for this `marketAcc`, empty when none. The personal `kIM` is a system-imposed risk floor (not a user setting); overlay it on the global `market.config.kIM` to compute per-user margin. Returns an empty list until personal margin bumps go live.
+     *
+     * @tags Accounts
+     * @name AccountsV2ControllerGetMarginConfig
+     * @summary Get personal margin config for an account
+     * @request GET:/v1/accounts/margin-config
+     */
+    accountsV2ControllerGetMarginConfig: (
+      query: {
+        /** Fully-packed 54-character `marketAcc` (cross or isolated) whose personal margin overrides to return. Build via `/v1/market-acc/encode`. */
+        marketAcc: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<MarginConfigsResponse, void>({
+        path: `/v1/accounts/margin-config`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
      * @description Returns the most recent per-event diffs live feed. Only for premium users.
      *
      * @tags Accounts
@@ -4189,6 +4881,278 @@ export class Sdk<
     ) =>
       this.request<DedicatedTxResponse, void>({
         path: `/v1/send-txs/dedicated/bulk-calls`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+  };
+  apiKeys = {
+    /**
+     * @description Generates an Ed25519 keypair, stores only the public key and returns the private key **once**. A root may hold at most 6 live keys. Authenticated by an EIP-712 ApiKeyAction signature with action="create", signed by the root wallet or by an agent approved on the root's sub-account 0 — such an agent has the same rights over API keys as the root.
+     *
+     * @tags API Keys
+     * @name ApiKeysControllerCreate
+     * @summary Create an API signing key
+     * @request POST:/v1/api-keys
+     */
+    apiKeysControllerCreate: (
+      data: CreateSigningKeyDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<SigningKeySecretDto, void>({
+        path: `/v1/api-keys`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Never returns secrets. Authenticated by an EIP-712 ApiKeyAction signature with action="list", passed as query parameters and signed by the root wallet or by an agent approved on the root's sub-account 0 — such an agent sees every key of that root.
+     *
+     * @tags API Keys
+     * @name ApiKeysControllerList
+     * @summary List your live API signing keys
+     * @request GET:/v1/api-keys
+     */
+    apiKeysControllerList: (
+      query: {
+        /**
+         * Root wallet that owns the keys
+         * @example "0x1234567890123456789012345678901234567890"
+         */
+        root: string;
+        /**
+         * Unix milliseconds; must be within 5 minutes of server time
+         * @example 1786000000000
+         */
+        timestamp: number;
+        /**
+         * Single-use 32-byte hex nonce
+         * @example "0x3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+         */
+        nonce: string;
+        /** EIP-712 ApiKeyAction signature by the root wallet, or by `agent` */
+        signature: string;
+        /**
+         * Agent approved on this root. Sign with the agent key instead of the root key.
+         * @example "0x1234567890123456789012345678901234567890"
+         */
+        agent?: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<SigningKeyDto[], any>({
+        path: `/v1/api-keys`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Patch semantics — omitted fields are left unchanged. Never touches key material, so anything already signing with this key keeps working. The envelope may be signed by the root wallet or by an agent approved on the root's sub-account 0, which may update any key of that root.
+     *
+     * @tags API Keys
+     * @name ApiKeysControllerUpdate
+     * @summary Update one API signing key
+     * @request POST:/v1/api-keys/update
+     */
+    apiKeysControllerUpdate: (
+      data: UpdateSigningKeyDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<SigningKeyDto, void>({
+        path: `/v1/api-keys/update`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Frees both its name and a key slot. The envelope may be signed by the root wallet or by an agent approved on the root's sub-account 0, which may revoke any key of that root, including root-minted ones.
+     *
+     * @tags API Keys
+     * @name ApiKeysControllerRevoke
+     * @summary Revoke one API signing key
+     * @request POST:/v1/api-keys/revoke
+     */
+    apiKeysControllerRevoke: (
+      data: SigningKeyIdDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, void>({
+        path: `/v1/api-keys/revoke`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description Public. Sign management envelopes against exactly this domain.
+     *
+     * @tags API Keys
+     * @name ApiKeysMetaControllerDomain
+     * @summary EIP-712 domain for ApiKeyAction signatures
+     * @request GET:/v1/api-keys/eip712-domain
+     */
+    apiKeysMetaControllerDomain: (params: RequestParams = {}) =>
+      this.request<Eip712DomainDto, any>({
+        path: `/v1/api-keys/eip712-domain`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+  };
+  stopOrders = {
+    /**
+     * @description Cursor-paginated conditional (stop-loss / take-profit) orders owned by the API key. Sorted newest first; pass the previous response's `resumeToken` for the next page, which is `null` once exhausted. **Cost.** `1 + ceil(limit / 200) - 1` CU.
+     *
+     * @tags Stop Orders
+     * @name StopOrdersControllerGetStopOrders
+     * @summary List your stop orders
+     * @request GET:/v1/stop-orders
+     */
+    stopOrdersControllerGetStopOrders: (
+      query?: {
+        /**
+         * Optional market filter. Omit to return conditional orders across every market.
+         * @min 1
+         */
+        marketId?: number;
+        /**
+         * Optional collateral-token filter (see `/v1/assets`). Ignored when `marketId` is supplied.
+         * @min 1
+         */
+        tokenId?: number;
+        /**
+         * `true` → only live orders (pending / executing / retrying). `false` → only finalised ones (filled, cancelled, expired, failed). Omit to return both.
+         * @example true
+         */
+        isActive?: boolean;
+        /** Resume token for cursor-based pagination. Pass the resumeToken from the previous response to fetch the next page. */
+        resumeToken?: string;
+        /**
+         * Maximum number of results to return. The parameter is capped at 200.
+         * @default 10
+         */
+        limit?: number;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<StopOrdersResponse, void>({
+        path: `/v1/stop-orders`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Builds the order struct and trigger condition to sign. Sign `req` (with `offchainCondition` replaced by its keccak256 hash) and submit it to `POST /stop-orders/place`. The returned `req.account` is derived from the API key — it is not something you choose. See the [Stop Orders guide](https://docs.pendle.finance/boros-dev/Backend/stop-orders) for the full workflow.
+     *
+     * @tags Stop Orders
+     * @name StopOrdersControllerPrepareTpslStopOrder
+     * @summary Prepare a take-profit / stop-loss order
+     * @request GET:/v1/stop-orders/prepare
+     */
+    stopOrdersControllerPrepareTpslStopOrder: (
+      query: {
+        /**
+         * Market of the position the trigger protects.
+         * @min 1
+         */
+        marketId: number;
+        /** Which account holds the position: `true` → the **cross** account for this `tokenId`, `false` → the **isolated** account on `marketId`. Must match where the position actually sits, otherwise the prepared order targets an empty account. */
+        isCross: boolean;
+        /** Side { LONG : 0, SHORT : 1 } */
+        side: 0 | 1;
+        /** StopAprOrderType { TAKE_PROFIT_MARKET : 2, STOP_LOSS_MARKET : 3 } */
+        type: 2 | 3;
+        /** If `true` the trigger closes the whole position and `size` is ignored; if `false` it closes `size`. */
+        closePosition: boolean;
+        /** BigInt string of the notional size to close, scaled by 10^18. Ignored when `closePosition` is `true`. */
+        size: string;
+        /** APR that arms the trigger (decimal, e.g. `0.085` = 8.5%). For a take-profit on a long this is the upper bound; for a stop-loss on a long, the lower bound. */
+        stopApr: number;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<PrepareTpslStopOrderResponse, void>({
+        path: `/v1/stop-orders/prepare`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Looks the order up scoped to the API key owner, so an id belonging to another root reads as not found. The id travels as a query parameter, not a path segment, so one signed `x-pendle-auth` token covers every lookup — the token binds the path only.
+     *
+     * @tags Stop Orders
+     * @name StopOrdersControllerGetStopOrder
+     * @summary Get one stop order
+     * @request GET:/v1/stop-orders/detail
+     */
+    stopOrdersControllerGetStopOrder: (
+      query: {
+        /**
+         * Conditional-order hash — the `orderHash` returned by `POST /stop-orders/place`.
+         * @example "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+         */
+        orderId: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<StopOrderResponse, void>({
+        path: `/v1/stop-orders/detail`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Submits an agent-signed conditional order prepared by `GET /stop-orders/prepare`. The order executes under the account derived from the API key; `agent` must already be approved on that account.
+     *
+     * @tags Stop Orders
+     * @name StopOrdersControllerPlaceStopOrder
+     * @summary Place a stop order
+     * @request POST:/v1/stop-orders/place
+     */
+    stopOrdersControllerPlaceStopOrder: (
+      data: PlaceStopOrderBodyDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<PlaceStopOrderResponse, void>({
+        path: `/v1/stop-orders/place`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Cancels up to 50 conditional orders in one signed request. All-or-nothing: the request fails if any id is unknown, already finalised, or owned by another account.
+     *
+     * @tags Stop Orders
+     * @name StopOrdersControllerCancelStopOrders
+     * @summary Cancel stop orders
+     * @request POST:/v1/stop-orders/cancel
+     */
+    stopOrdersControllerCancelStopOrders: (
+      data: CancelStopOrdersBodyDto,
+      params: RequestParams = {},
+    ) =>
+      this.request<CancelStopOrdersResponse, void>({
+        path: `/v1/stop-orders/cancel`,
         method: "POST",
         body: data,
         type: ContentType.Json,

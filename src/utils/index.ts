@@ -34,6 +34,7 @@ export async function sendTx(walletClient: WalletClient, calldata: Hex) {
     account,
     to: getRouterAddress(),
     data: calldata,
+    // FIXME: @negativez2 handle native token
     value: 0n,
     chain: walletClient.chain,
   });

@@ -1,4 +1,3 @@
-// import { rpcResponseTime } from '@libs/monitor/prometheus-metrics/metrics.constant';
 import {
   CreateTransportErrorType,
   ExecutionRevertedError,
@@ -79,4 +78,3 @@ function shouldThrow(error: Error) {
   }
   return false;
 }
-

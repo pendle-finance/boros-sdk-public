@@ -21,7 +21,7 @@ export function createPendleBorosRouterDomain(routerAddress?: Address, chainId?:
 // @deprecated: Use createPendleBorosRouterDomain instead
 export const PENDLE_BOROS_ROUTER_DOMAIN = () => createPendleBorosRouterDomain();
 
-function getSecureRandomValues(length: number): Uint8Array {
+export function getSecureRandomValues(length: number): Uint8Array {
   const randomBytes = new Uint8Array(length);
 
   // Use browser's crypto API if available
