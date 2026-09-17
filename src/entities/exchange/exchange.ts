@@ -423,13 +423,14 @@ export class Exchange {
   }
 
   async payTreasury(params: PayTreasuryParams) {
-    const { nonces, isCross, marketId, usdAmount } = params;
+    const { nonces, isCross, marketId } = params;
+    const amount = params.amount !== undefined ? params.amount : await this.usdToScaledCash(marketId, params.usdAmount);
     const { data: payTreasuryCalldataResponse } =
       await this.openApiSdk.calldataBuilderAgentExecutable.calldataBuilderAgentControllerBuildPayTreasury({
         accountId: this.accountId,
         isCross,
         marketId,
-        amount: usdAmount.toString(),
+        amount: amount.toString(),
       });
 
     const payTreasuryResponse = await this.bulkSignAndExecute(
@@ -437,6 +438,18 @@ export class Exchange {
       nonces
     );
     return payTreasuryResponse;
+  }
+
+  private async usdToScaledCash(marketId: number, usdAmount: number): Promise<bigint> {
+    const [{ data: markets }, { data: assets }] = await Promise.all([
+      this.openApiSdk.markets.marketsControllerGetMarketsByIds({ marketIds: String(marketId) }),
+      this.openApiSdk.assets.assetsControllerListAssets(),
+    ]);
+    const tokenId = markets.results[0]?.tokenId;
+    if (tokenId === undefined) throw new Error(`Market ${marketId} not found`);
+    const usdPrice = Number(assets.results.find((asset) => asset.tokenId === tokenId)?.usdPrice);
+    if (!(usdPrice > 0)) throw new Error(`No USD price for token ${tokenId}`);
+    return FixedX18.fromNumber(usdAmount / usdPrice).value;
   }
 
   async scheduleCancel(_time?: number) {

@@ -67,9 +67,12 @@ export type CancelOrdersParams = {
 export type PayTreasuryParams = {
   isCross: boolean;
   marketId: number;
-  usdAmount: number;
   nonces?: bigint[];
-};
+} & (
+  | { usdAmount: number; amount?: never }
+  // scaled cash, 18 decimals for every token (1 USDC = 10n ** 18n), same unit as cashTransfer
+  | { amount: bigint; usdAmount?: never }
+);
 
 export type DepositParams = {
   userAddress: Address;

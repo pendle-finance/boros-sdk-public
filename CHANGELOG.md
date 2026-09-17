@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- 71b66f7: `Exchange.payTreasury` now takes either `usdAmount` (converted with the token's USD price from `/assets`) or `amount` (scaled cash, 18 decimals for every token). Previously `usdAmount` was sent unconverted as the raw amount, so it paid a negligible fee.
+
+## 0.3.2
+
+### Patch Changes
+
+- 29e7967: Release pipeline change only; no source changes.
+
 ## 0.3.1
 
 ### Patch Changes
